@@ -59,6 +59,39 @@ describe('isTokenHeader', () => {
 
     expect(JWT.isTokenHeader(invalidTokenHeader)).toBe(false)
   })
+
+  it('returns true when the typ field is JWT in any case or with the application/ prefix', () => {
+    for (const typ of ['JWT', 'jwt', 'application/jwt', 'Application/JWT']) {
+      expect(JWT.isTokenHeader({ alg: AlgorithmTypes.HS256, typ })).toBe(true)
+    }
+  })
+
+  it('returns true when the typ field is at+jwt in any case or with the application/ prefix', () => {
+    // OAuth 2.0 access tokens (RFC 9068 2.1)
+    for (const typ of ['at+jwt', 'AT+JWT', 'application/at+jwt', 'Application/At+JWT']) {
+      expect(JWT.isTokenHeader({ alg: AlgorithmTypes.HS256, typ })).toBe(true)
+    }
+  })
+
+  it('returns false when the typ field is an unsupported value', () => {
+    for (const typ of [
+      'JOSE',
+      'JWS',
+      'rt+jwt',
+      'text/jwt',
+      'application/',
+      'at+jwt ',
+      'xapplication/jwt',
+    ]) {
+      expect(JWT.isTokenHeader({ alg: AlgorithmTypes.HS256, typ })).toBe(false)
+    }
+  })
+
+  it('returns false when the typ field is not a string', () => {
+    for (const typ of [null, 1, true, ['JWT'], { typ: 'JWT' }]) {
+      expect(JWT.isTokenHeader({ alg: AlgorithmTypes.HS256, typ })).toBe(false)
+    }
+  })
 })
 
 describe('JWT', () => {
@@ -119,6 +152,31 @@ describe('JWT', () => {
     const secret = 'a-secret'
     const encode = (s: string) => encodeBase64Url(utf8Encoder.encode(s).buffer).replace(/=/g, '')
     const signingInput = `${encode('{"alg":"HS256","typ":"JWT","crit":["exp"],"exp":1}')}.${encode('{"message":"hello"}')}`
+    const signature = await signing(secret, AlgorithmTypes.HS256, utf8Encoder.encode(signingInput))
+    const tok = `${signingInput}.${encodeBase64Url(signature).replace(/=/g, '')}`
+    const err = await JWT.verify(tok, secret, AlgorithmTypes.HS256).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(JwtHeaderInvalid)
+  })
+
+  it('HS256 verify with an access token typ', async () => {
+    const secret = 'a-secret'
+    const encode = (s: string) => encodeBase64Url(utf8Encoder.encode(s).buffer).replace(/=/g, '')
+    for (const typ of ['at+jwt', 'application/at+jwt']) {
+      const signingInput = `${encode(`{"alg":"HS256","typ":"${typ}"}`)}.${encode('{"message":"hello"}')}`
+      const signature = await signing(
+        secret,
+        AlgorithmTypes.HS256,
+        utf8Encoder.encode(signingInput)
+      )
+      const tok = `${signingInput}.${encodeBase64Url(signature).replace(/=/g, '')}`
+      expect(await JWT.verify(tok, secret, AlgorithmTypes.HS256)).toEqual({ message: 'hello' })
+    }
+  })
+
+  it('JwtHeaderInvalid for a header with an unsupported typ', async () => {
+    const secret = 'a-secret'
+    const encode = (s: string) => encodeBase64Url(utf8Encoder.encode(s).buffer).replace(/=/g, '')
+    const signingInput = `${encode('{"alg":"HS256","typ":"JOSE"}')}.${encode('{"message":"hello"}')}`
     const signature = await signing(secret, AlgorithmTypes.HS256, utf8Encoder.encode(signingInput))
     const tok = `${signingInput}.${encodeBase64Url(signature).replace(/=/g, '')}`
     const err = await JWT.verify(tok, secret, AlgorithmTypes.HS256).catch((e: unknown) => e)
@@ -1113,6 +1171,35 @@ describe('verifyWithJwks header.alg fallback', () => {
     const result = await verifyWithJwks(token, { keys, allowedAlgorithms: ['RS256'] })
 
     // If verification succeeds, it means header.alg was used
+    expect(result).toEqual(payload)
+  })
+})
+
+describe('verifyWithJwks access token typ', () => {
+  it('Should accept access token with typ at+jwt', async () => {
+    const payload = { message: 'hello world' }
+    const kid = 'at-key'
+    const keyPair = await crypto.subtle.generateKey(
+      {
+        name: 'RSASSA-PKCS1-v1_5',
+        modulusLength: 2048,
+        publicExponent: new Uint8Array([1, 0, 1]),
+        hash: 'SHA-256',
+      },
+      true,
+      ['sign', 'verify']
+    )
+    const encode = (obj: object) => encodeBase64Url(utf8Encoder.encode(JSON.stringify(obj)).buffer)
+    const signingInput = `${encode({ alg: 'RS256', typ: 'at+jwt', kid })}.${encode(payload)}`
+    const signature = await signing(keyPair.privateKey, 'RS256', utf8Encoder.encode(signingInput))
+    const token = `${signingInput}.${encodeBase64Url(signature)}`
+    const jwk = await crypto.subtle.exportKey('jwk', keyPair.publicKey)
+
+    const result = await verifyWithJwks(token, {
+      keys: [{ ...jwk, kid, alg: 'RS256' }],
+      allowedAlgorithms: ['RS256'],
+    })
+
     expect(result).toEqual(payload)
   })
 })

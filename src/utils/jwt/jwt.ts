@@ -37,8 +37,17 @@ const decodeJwtPart = (part: string): TokenHeader | JWTPayload | undefined =>
 
 export interface TokenHeader {
   alg: SignatureAlgorithm
-  typ?: 'JWT'
+  typ?: string
   kid?: string
+}
+
+// `typ` is a case-insensitive media type whose "application/" prefix may be omitted (RFC 7515 4.1.9).
+// Accept "JWT" (RFC 7519 5.1) and "at+jwt" for OAuth 2.0 access tokens (RFC 9068 2.1).
+const isAllowedTyp = (typ: unknown): boolean => {
+  if (typeof typ !== 'string') {
+    return false
+  }
+  return ['jwt', 'at+jwt'].includes(typ.toLowerCase().replace(/^application\//, ''))
 }
 
 export function isTokenHeader(obj: unknown): obj is TokenHeader {
@@ -47,7 +56,7 @@ export function isTokenHeader(obj: unknown): obj is TokenHeader {
     return (
       'alg' in objWithAlg &&
       Object.values(AlgorithmTypes).includes(objWithAlg.alg as AlgorithmTypes) &&
-      (!('typ' in objWithAlg) || objWithAlg.typ === 'JWT') &&
+      (!('typ' in objWithAlg) || isAllowedTyp(objWithAlg.typ)) &&
       // no extension is implemented, so any `crit` must be rejected (RFC 7515 4.1.11)
       !('crit' in objWithAlg)
     )
