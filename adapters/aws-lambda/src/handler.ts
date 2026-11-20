@@ -11,6 +11,9 @@ import type {
   LatticeRequestContextV2,
 } from './types'
 
+// Keep a leading UTF-8 BOM in the response body.
+const utf8Decoder = new TextDecoder('utf-8', { ignoreBOM: true })
+
 function sanitizeHeaderValue(value: string): string {
   // Check if the value contains non-ASCII characters (char codes > 127)
   // eslint-disable-next-line no-control-regex
@@ -360,7 +363,8 @@ export abstract class EventProcessor<E extends LambdaEvent> {
       isBase64Encoded = isContentEncodingBinary(contentEncoding)
     }
 
-    const body = isBase64Encoded ? encodeBase64(await res.arrayBuffer()) : await res.text()
+    const bytes = await res.arrayBuffer()
+    const body = isBase64Encoded ? encodeBase64(bytes) : utf8Decoder.decode(bytes)
 
     const result: APIGatewayProxyResult = {
       body: body,

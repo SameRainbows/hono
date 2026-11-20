@@ -480,6 +480,22 @@ describe('EventProcessor.createRequest', () => {
 })
 
 describe('handle', () => {
+  it.each([baseV1Event, baseV2Event])(
+    'Should preserve a UTF-8 BOM in a text response (API Gateway v$version)',
+    async (event) => {
+      const body = '\uFEFFname\r\n日本語\r\n'
+      const contentType = 'text/csv; charset=utf-8'
+      const app = new Hono()
+      app.all('/my/path', (c) => c.body(body, 200, { 'Content-Type': contentType }))
+
+      const result = await handle(app)(event)
+
+      expect(result.statusCode).toBe(200)
+      expect(result.isBase64Encoded).toBe(false)
+      expect(result.body).toBe(body)
+    }
+  )
+
   it('Should route a V1 REST event by its path even when a base path mapping adds rawPath', async () => {
     const app = new Hono()
     app.get('/my/path', (c) => c.text('Hello'))
