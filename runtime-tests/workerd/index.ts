@@ -1,4 +1,5 @@
 import { env, getRuntimeKey } from '../../src/helper/adapter'
+import { streamSSE } from '../../src/helper/streaming'
 import { Hono } from '../../src/hono'
 import { getColorEnabledAsync } from '../../src/utils/color'
 
@@ -13,6 +14,13 @@ app.get('/env', (c) => {
 
 app.get('/color', async (c) => {
   return c.text((await getColorEnabledAsync()) ? 'True' : 'False')
+})
+
+app.get('/events', (c) => {
+  return streamSSE(c, async (stream) => {
+    await stream.writeSSE({ data: 'first' })
+    await stream.writeSSE({ data: 'second' })
+  })
 })
 
 export default app

@@ -1,6 +1,6 @@
 import type { Context } from '../../context'
 import { HtmlEscapedCallbackPhase, resolveCallback } from '../../utils/html'
-import { StreamingApi } from '../../utils/stream'
+import { createStreamingApi, StreamingApi } from '../../utils/stream'
 import { isOldBunVersion } from './utils'
 
 export interface SSEMessage {
@@ -75,8 +75,7 @@ export const streamSSE = (
   cb: (stream: SSEStreamingApi) => Promise<void>,
   onError?: (e: Error, stream: SSEStreamingApi) => Promise<void>
 ): Response => {
-  const { readable, writable } = new TransformStream()
-  const stream = new SSEStreamingApi(writable, readable)
+  const stream = createStreamingApi(SSEStreamingApi)
 
   // Until Bun v1.1.27, Bun didn't call cancel() on the ReadableStream for Response objects from Bun.serve()
   if (isOldBunVersion()) {

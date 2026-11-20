@@ -25,6 +25,48 @@ describe('Basic Streaming Helper', () => {
     }
   })
 
+  it('Buffers one chunk and resumes a blocked write when the consumer reads', async () => {
+    const writes: number[] = []
+    const res = stream(c, async (output) => {
+      await output.write(Uint8Array.of(1))
+      writes.push(1)
+      await output.write(Uint8Array.of(2))
+      writes.push(2)
+    })
+
+    await vi.waitFor(() => expect(writes).toEqual([1]))
+    const reader = res.body!.getReader()
+    expect((await reader.read()).value).toEqual(Uint8Array.of(1))
+    await vi.waitFor(() => expect(writes).toEqual([1, 2]))
+    expect((await reader.read()).value).toEqual(Uint8Array.of(2))
+    expect((await reader.read()).done).toBe(true)
+  })
+
+  it('Drains the queued chunk and releases a blocked write on explicit abort', async () => {
+    const onAbort = vi.fn()
+    let abort!: () => void
+    let firstWritten = false
+    let secondSettled = false
+    const res = stream(c, async (output) => {
+      abort = () => output.abort()
+      output.onAbort(onAbort)
+      await output.write(Uint8Array.of(1))
+      firstWritten = true
+      await output.write(Uint8Array.of(2))
+      secondSettled = true
+    })
+
+    await vi.waitFor(() => expect(firstWritten).toBe(true))
+    expect(secondSettled).toBe(false)
+    abort()
+
+    const reader = res.body!.getReader()
+    expect((await reader.read()).value).toEqual(Uint8Array.of(1))
+    expect((await reader.read()).done).toBe(true)
+    await vi.waitFor(() => expect(secondSettled).toBe(true))
+    expect(onAbort).toHaveBeenCalledOnce()
+  })
+
   it('Check stream Response if aborted by client', async () => {
     let aborted = false
     const res = stream(c, async (stream) => {

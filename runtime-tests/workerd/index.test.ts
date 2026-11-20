@@ -35,6 +35,12 @@ describe('workerd', () => {
     expect(res.status).toBe(200)
     expect(await res.text()).toBe('True')
   })
+
+  it('Streams SSE events in order', async () => {
+    const res = await worker.fetch('/events')
+    expect(res.headers.get('Content-Type')).toBe('text/event-stream')
+    expect(await res.text()).toBe('data: first\n\ndata: second\n\n')
+  })
 })
 
 describe('workerd with NO_COLOR', () => {

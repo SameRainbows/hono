@@ -3,6 +3,81 @@
  * Stream utility.
  */
 
+const responseQueueAborts = new WeakMap<ReadableStream, () => void>()
+
+/** @internal */
+export function createStreamingApi<T extends StreamingApi>(
+  Api: new (writable: WritableStream, readable: ReadableStream) => T
+): T {
+  let readableController!: ReadableStreamDefaultController<Uint8Array>
+  let writableController!: WritableStreamDefaultController
+  let resumeWrite: (() => void) | undefined
+  let open = true
+
+  function cancelQueue(closeReadable: boolean) {
+    if (!open) {
+      return
+    }
+    open = false
+    if (closeReadable) {
+      readableController.close()
+    }
+    writableController.error()
+    resumeWrite?.()
+  }
+
+  const readable = new ReadableStream<Uint8Array>({
+    start(controller) {
+      readableController = controller
+    },
+    pull() {
+      resumeWrite?.()
+    },
+    cancel() {
+      cancelQueue(false)
+      if (!api.closed) {
+        api.abort()
+      }
+    },
+  })
+  const writable = new WritableStream<Uint8Array>({
+    start(controller) {
+      writableController = controller
+    },
+    write(chunk) {
+      if (!open) {
+        return
+      }
+      if ((readableController.desiredSize ?? 0) > 0) {
+        readableController.enqueue(chunk)
+        return
+      }
+      // The writable runs one write at a time. A read frees space for it.
+      return new Promise<void>((resolve) => {
+        resumeWrite = () => {
+          resumeWrite = undefined
+          if (open) {
+            readableController.enqueue(chunk)
+          }
+          resolve()
+        }
+      })
+    },
+    close() {
+      if (open) {
+        open = false
+        readableController.close()
+      }
+    },
+  })
+
+  // Internal helpers already own the response queue. Keep the constructor's
+  // forwarding behavior for callers that pass their own streams.
+  responseQueueAborts.set(readable, () => cancelQueue(true))
+  const api = new Api(writable, readable)
+  return api
+}
+
 export class StreamingApi {
   private writer: WritableStreamDefaultWriter<Uint8Array>
   private encoder: TextEncoder
@@ -22,6 +97,14 @@ export class StreamingApi {
     this.writable = writable
     this.writer = writable.getWriter()
     this.encoder = new TextEncoder()
+
+    const abortResponseQueue = responseQueueAborts.get(_readable)
+    if (abortResponseQueue) {
+      responseQueueAborts.delete(_readable)
+      this.responseReadable = _readable
+      this.abortSubscribers.push(abortResponseQueue)
+      return
+    }
 
     const reader = _readable.getReader()
 
